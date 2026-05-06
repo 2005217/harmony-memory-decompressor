@@ -1,0 +1,5 @@
+{
+  "libmemory_decompressor.so": {
+    "source": "src/mock/Libmemory_decompressor.mock.ets"
+  }
+}

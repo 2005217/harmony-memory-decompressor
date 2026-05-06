@@ -1,0 +1,11 @@
+{
+  "name": "memory_decompressor",
+  "version": "1.0.0",
+  "description": "Please describe the basic information.",
+  "main": "",
+  "author": "",
+  "license": "",
+  "dependencies": {
+    "libmemory_decompressor.so": "file:./src/main/cpp/types/libmemory_decompressor"
+  }
+}

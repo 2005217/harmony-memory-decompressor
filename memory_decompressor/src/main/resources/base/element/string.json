@@ -1,0 +1,16 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "module description"
+    },
+    {
+      "name": "Memory_decompressorAbility_desc",
+      "value": "description"
+    },
+    {
+      "name": "Memory_decompressorAbility_label",
+      "value": "label"
+    }
+  ]
+}
