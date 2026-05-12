@@ -1,6 +1,6 @@
 {
-  "name": "libmemory_decompressor.so",
-  "types": "./Index.d.ts",
+  "name": "libmemory_decompressor",
+  "types": "./index.d.ts",
   "version": "1.0.0",
   "description": "Please describe the basic information."
 }

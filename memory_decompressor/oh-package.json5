@@ -6,6 +6,6 @@
   "author": "",
   "license": "",
   "dependencies": {
-    "libmemory_decompressor.so": "file:./src/main/cpp/types/libmemory_decompressor"
+    "libmemory_decompressor": "file:./src/main/cpp/types/libmemory_decompressor"
   }
 }

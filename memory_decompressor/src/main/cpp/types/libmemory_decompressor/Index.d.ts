@@ -1,3 +1,5 @@
-export const compress: (data: Uint8Array, level?: number) => Uint8Array;
-export const decompress: (data: Uint8Array) => Uint8Array;
+export const compress: (data: ArrayBuffer, level?: number) => ArrayBuffer;
+export const decompress: (data: ArrayBuffer) => ArrayBuffer;
 export const version: () => string;
+export const getSupportedFormats: () => string[];
+export const detectFormat: (data: ArrayBuffer) => string;
