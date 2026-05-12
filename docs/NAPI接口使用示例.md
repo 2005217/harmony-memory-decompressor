@@ -8,13 +8,13 @@ import zstd from 'libmemory_decompressor.so'
 
 ## API 参考
 
-### compress
+### compressAsync
 
-压缩数据。
+异步压缩数据。压缩操作在后台线程执行，不会阻塞 UI 线程。
 
 **签名**：
 ```arkts
-compress(data: ArrayBuffer, level?: number): ArrayBuffer
+compressAsync(data: ArrayBuffer, level?: number): Promise<ArrayBuffer>
 ```
 
 **参数**：
@@ -24,7 +24,7 @@ compress(data: ArrayBuffer, level?: number): ArrayBuffer
 | data | `ArrayBuffer` | 是 | - | 待压缩的原始数据 |
 | level | `number` | 否 | `3` | 压缩级别（1=最快, 3=默认, 22=最高压缩率） |
 
-**返回值**：`ArrayBuffer` - 压缩后的数据
+**返回值**：`Promise<ArrayBuffer>` - 解析为压缩后的数据
 
 **示例**：
 ```arkts
@@ -37,25 +37,24 @@ for (let i = 0; i < originalText.length; i++) {
   inputBuffer[i] = originalText.charCodeAt(i)
 }
 
-// 基本压缩
-const compressed: ArrayBuffer = zstd.compress(inputBuffer.buffer)
-
-// 指定压缩级别
-const compressedFast: ArrayBuffer = zstd.compress(inputBuffer.buffer, 1)
-const compressedMax: ArrayBuffer = zstd.compress(inputBuffer.buffer, 22)
-
-hilog.info(DOMAIN, 'ZstdDemo', '压缩完成, 大小: %{public}d 字节', compressed.byteLength)
+zstd.compressAsync(inputBuffer.buffer)
+  .then((compressed: ArrayBuffer) => {
+    hilog.info(DOMAIN, 'ZstdDemo', '异步压缩完成, 大小: %{public}d 字节', compressed.byteLength)
+  })
+  .catch((e: Error) => {
+    hilog.error(DOMAIN, 'ZstdDemo', '压缩失败: %{public}s', e.message)
+  })
 ```
 
 ---
 
-### decompress
+### decompressAsync
 
-解压缩数据。
+异步解压缩数据。解压操作在后台线程执行，不会阻塞 UI 线程。
 
 **签名**：
 ```arkts
-decompress(data: ArrayBuffer): ArrayBuffer
+decompressAsync(data: ArrayBuffer): Promise<ArrayBuffer>
 ```
 
 **参数**：
@@ -64,23 +63,21 @@ decompress(data: ArrayBuffer): ArrayBuffer
 |------|------|------|------|
 | data | `ArrayBuffer` | 是 | 待解压的压缩数据 |
 
-**返回值**：`ArrayBuffer` - 解压后的原始数据
+**返回值**：`Promise<ArrayBuffer>` - 解析为解压后的原始数据
 
 **示例**：
 ```arkts
 import { hilog } from '@kit.PerformanceAnalysisKit'
 
 const DOMAIN = 0x0000
-const decompressed: ArrayBuffer = zstd.decompress(compressedData)
-const decompressedView: Uint8Array = new Uint8Array(decompressed)
-
-// 转为字符串
-let text: string = ''
-for (let i = 0; i < decompressedView.length; i++) {
-  text += String.fromCharCode(decompressedView[i])
-}
-
-hilog.info(DOMAIN, 'ZstdDemo', '解压完成, 大小: %{public}d 字节', decompressed.byteLength)
+zstd.decompressAsync(compressedData)
+  .then((decompressed: ArrayBuffer) => {
+    const view: Uint8Array = new Uint8Array(decompressed)
+    hilog.info(DOMAIN, 'ZstdDemo', '异步解压完成, 大小: %{public}d 字节', decompressed.byteLength)
+  })
+  .catch((e: Error) => {
+    hilog.error(DOMAIN, 'ZstdDemo', '解压失败: %{public}s', e.message)
+  })
 ```
 
 ---
@@ -162,7 +159,7 @@ hilog.info(DOMAIN, 'ZstdDemo', '检测格式: %{public}s', format)
 
 ## 完整使用示例
 
-### 压缩与解压文本
+### 异步压缩与解压文本
 
 ```arkts
 import { hilog } from '@kit.PerformanceAnalysisKit'
@@ -186,21 +183,26 @@ function uint8ArrayToString(arr: Uint8Array): string {
   return str
 }
 
-// 压缩
-const originalText: string = 'Hello HarmonyOS ZSTD!'
+const originalText: string = 'Hello HarmonyOS ZSTD Async!'
 const originalData: Uint8Array = stringToUint8Array(originalText)
-const compressed: ArrayBuffer = zstd.compress(originalData.buffer)
-const ratio: string = ((compressed.byteLength / originalData.length) * 100).toFixed(2)
-hilog.info(DOMAIN, 'ZstdDemo', '压缩率: %{public}s%%', ratio)
 
-// 解压
-const decompressed: ArrayBuffer = zstd.decompress(compressed)
-const decompressedView: Uint8Array = new Uint8Array(decompressed)
-const resultText: string = uint8ArrayToString(decompressedView)
-hilog.info(DOMAIN, 'ZstdDemo', '解压结果: %{public}s', resultText)
+zstd.compressAsync(originalData.buffer)
+  .then((compressed: ArrayBuffer) => {
+    hilog.info(DOMAIN, 'ZstdDemo', '异步压缩完成: %{public}d → %{public}d 字节',
+      originalData.length, compressed.byteLength)
+    return zstd.decompressAsync(compressed)
+  })
+  .then((decompressed: ArrayBuffer) => {
+    const view: Uint8Array = new Uint8Array(decompressed)
+    const resultText: string = uint8ArrayToString(view)
+    hilog.info(DOMAIN, 'ZstdDemo', '异步解压结果: %{public}s', resultText)
+  })
+  .catch((e: Error) => {
+    hilog.error(DOMAIN, 'ZstdDemo', '异步操作失败: %{public}s', e.message)
+  })
 ```
 
-### 压缩二进制数据
+### 异步大数据处理
 
 ```arkts
 import { hilog } from '@kit.PerformanceAnalysisKit'
@@ -213,37 +215,27 @@ for (let i = 0; i < size; i++) {
   data[i] = (i * 73 + 137) & 0xFF
 }
 
-// 压缩
-const compressed: ArrayBuffer = zstd.compress(data.buffer)
-hilog.info(DOMAIN, 'ZstdDemo', '%{public}d → %{public}d 字节', size, compressed.byteLength)
-
-// 解压并验证
-const decompressed: ArrayBuffer = zstd.decompress(compressed)
-const decompressedView: Uint8Array = new Uint8Array(decompressed)
-
-let match: boolean = decompressedView.length === data.length
-if (match) {
-  for (let i = 0; i < data.length; i++) {
-    if (decompressedView[i] !== data[i]) {
-      match = false
-      break
+zstd.compressAsync(data.buffer)
+  .then((compressed: ArrayBuffer) => {
+    hilog.info(DOMAIN, 'ZstdDemo', '异步大数据压缩: %{public}d → %{public}d 字节',
+      size, compressed.byteLength)
+    return zstd.decompressAsync(compressed)
+  })
+  .then((decompressed: ArrayBuffer) => {
+    const view: Uint8Array = new Uint8Array(decompressed)
+    let match: boolean = view.length === size
+    if (match) {
+      for (let i = 0; i < size; i++) {
+        if (view[i] !== data[i]) {
+          match = false
+          break
+        }
+      }
     }
-  }
-}
-hilog.info(DOMAIN, 'ZstdDemo', '逐字节一致性验证: %{public}s', match ? '通过' : '失败')
-```
-
-### 空数据处理
-
-```arkts
-import { hilog } from '@kit.PerformanceAnalysisKit'
-import zstd from 'libmemory_decompressor.so'
-
-const DOMAIN = 0x0000
-const emptyData: Uint8Array = new Uint8Array(0)
-const compressed: ArrayBuffer = zstd.compress(emptyData.buffer)
-hilog.info(DOMAIN, 'ZstdDemo', '空数据压缩后大小: %{public}d 字节', compressed.byteLength)
-
-const decompressed: ArrayBuffer = zstd.decompress(compressed)
-hilog.info(DOMAIN, 'ZstdDemo', '空数据解压后大小: %{public}d 字节', decompressed.byteLength)
+    hilog.info(DOMAIN, 'ZstdDemo', '异步大数据解压验证: %{public}s',
+      match ? '通过' : '失败')
+  })
+  .catch((e: Error) => {
+    hilog.error(DOMAIN, 'ZstdDemo', '异步大数据处理失败: %{public}s', e.message)
+  })
 ```

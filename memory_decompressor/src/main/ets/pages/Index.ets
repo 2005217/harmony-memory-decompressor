@@ -254,6 +254,96 @@ struct Index {
     }
   }
 
+  testCompressAsync(): void {
+    try {
+      if (typeof zstd.compressAsync !== 'function') {
+        this.appendLog('[错误] compressAsync 不是函数');
+        return;
+      }
+      const inputText: string = this.testInput;
+      if (!inputText) {
+        this.appendLog('[错误] 请输入测试数据');
+        return;
+      }
+      const originalData: Uint8Array = stringToUint8Array(inputText);
+      this.originalSize = originalData.length;
+      this.appendLog('异步压缩开始...');
+
+      zstd.compressAsync(originalData.buffer).then((compressed: ArrayBuffer) => {
+        this.compressedData = compressed;
+        this.compressedSize = compressed.byteLength;
+        const ratio: string = ((compressed.byteLength / originalData.length) * 100).toFixed(2);
+        this.compressionRatio = ratio;
+        this.appendLog('异步压缩完成');
+        this.appendLog('  原始大小: ' + originalData.length + ' 字节');
+        this.appendLog('  压缩后大小: ' + compressed.byteLength + ' 字节');
+        this.appendLog('  压缩率: ' + ratio + '%');
+      }).catch((e: Error) => {
+        this.appendLog('[异常] 异步压缩失败: ' + e.message);
+      });
+    } catch (e) {
+      const errMsg = (e instanceof Error) ? e.message : JSON.stringify(e);
+      this.appendLog('[异常] compressAsync 调用失败: ' + errMsg);
+    }
+  }
+
+  testDecompressAsync(): void {
+    try {
+      if (typeof zstd.decompressAsync !== 'function') {
+        this.appendLog('[错误] decompressAsync 不是函数');
+        return;
+      }
+      if (!this.compressedData) {
+        this.appendLog('[错误] 请先执行压缩测试');
+        return;
+      }
+      this.appendLog('异步解压开始...');
+
+      zstd.decompressAsync(this.compressedData).then((decompressed: ArrayBuffer) => {
+        const decompressedView: Uint8Array = new Uint8Array(decompressed);
+        const originalData: Uint8Array = stringToUint8Array(this.testInput);
+        const match: boolean = uint8ArrayEquals(decompressedView, originalData);
+        this.appendLog('异步解压完成');
+        this.appendLog('  解压后大小: ' + decompressed.byteLength + ' 字节');
+        this.appendLog('  逐字节一致性验证: ' + (match ? '通过' : '失败'));
+        this.appendLog('  解压数据(文本):');
+        this.appendLog('    ' + uint8ArrayToString(decompressedView));
+      }).catch((e: Error) => {
+        this.appendLog('[异常] 异步解压失败: ' + e.message);
+      });
+    } catch (e) {
+      const errMsg = (e instanceof Error) ? e.message : JSON.stringify(e);
+      this.appendLog('[异常] decompressAsync 调用失败: ' + errMsg);
+    }
+  }
+
+  testLargeDataAsync(): void {
+    try {
+      if (typeof zstd.compressAsync !== 'function') {
+        this.appendLog('[错误] compressAsync 不是函数');
+        return;
+      }
+      const size: number = 100000;
+      const arr: Uint8Array = generateTestData(size);
+      this.appendLog('异步大数据压缩开始 (100KB)...');
+
+      zstd.compressAsync(arr.buffer).then((compressed: ArrayBuffer): Promise<ArrayBuffer> => {
+        const ratio: string = ((compressed.byteLength / size) * 100).toFixed(2);
+        this.appendLog('异步大数据压缩完成: ' + size + ' → ' + compressed.byteLength + ' 字节, 压缩率 ' + ratio + '%');
+        return zstd.decompressAsync(compressed);
+      }).then((decompressed: ArrayBuffer) => {
+        const decompressedView: Uint8Array = new Uint8Array(decompressed);
+        const match: boolean = uint8ArrayEquals(decompressedView, arr);
+        this.appendLog('异步大数据解压完成, 大小: ' + decompressed.byteLength + ' 字节, 逐字节一致性: ' + (match ? '通过' : '失败'));
+      }).catch((e: Error) => {
+        this.appendLog('[异常] 异步大数据处理失败: ' + e.message);
+      });
+    } catch (e) {
+      const errMsg = (e instanceof Error) ? e.message : JSON.stringify(e);
+      this.appendLog('[异常] 异步大数据调用失败: ' + errMsg);
+    }
+  }
+
   clearLog(): void {
     this.logText = '';
     this.compressedData = undefined;
@@ -358,6 +448,45 @@ struct Index {
           }
           .width('100%')
           .margin({ bottom: 8 })
+
+          Text('异步操作测试')
+            .fontSize(16)
+            .fontWeight(FontWeight.Bold)
+            .width('100%')
+            .margin({ top: 8, bottom: 8 })
+
+          Row() {
+            Button('异步压缩')
+              .onClick(() => this.testCompressAsync())
+              .backgroundColor('#E83E8C')
+              .flexGrow(1)
+              .margin({ right: 4 })
+
+            Button('异步解压')
+              .onClick(() => this.testDecompressAsync())
+              .backgroundColor('#E83E8C')
+              .flexGrow(1)
+              .margin({ left: 4 })
+          }
+          .width('100%')
+          .margin({ bottom: 8 })
+
+          Row() {
+            Button('异步大数据(100KB)')
+              .onClick(() => this.testLargeDataAsync())
+              .backgroundColor('#E83E8C')
+              .flexGrow(1)
+              .margin({ right: 4 })
+
+            Button('')
+              .backgroundColor('#E83E8C')
+              .flexGrow(1)
+              .margin({ left: 4 })
+              .enabled(false)
+              .opacity(0)
+          }
+          .width('100%')
+          .margin({ bottom: 12 })
 
           Text('不同压缩级别对比')
             .fontSize(16)
