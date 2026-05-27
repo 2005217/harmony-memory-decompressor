@@ -1,0 +1,20 @@
+{
+  "name": "library_decompressor",
+  "version": "1.0.1",
+  "description": "HarmonyOS memory compression/decompression library supporting ZSTD, LZ4 Frame, and Snappy formats via N-API",
+  "main": "Index.ets",
+  "author": "0721",
+  "license": "Apache-2.0",
+  "keywords": [
+    "compression",
+    "decompression",
+    "zstd",
+    "lz4",
+    "snappy",
+    "napi",
+    "harmonyos"
+  ],
+  "dependencies": {
+    "libmemory_decompressor": "file:./src/main/cpp/types/libmemory_decompressor"
+  }
+}

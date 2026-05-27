@@ -1,0 +1,12 @@
+{
+  "module": {
+    "name": "library_decompressor",
+    "type": "har",
+    "description": "HarmonyOS memory compression/decompression library supporting ZSTD, LZ4 Frame, and Snappy",
+    "deviceTypes": [
+      "phone",
+      "tablet",
+      "2in1"
+    ]
+  }
+}

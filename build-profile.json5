@@ -1,6 +1,20 @@
 {
   "app": {
-    "signingConfigs": [],
+    "signingConfigs": [
+      {
+        "name": "default",
+        "type": "HarmonyOS",
+        "material": {
+          "certpath": "C:\\Users\\李罗诚\\.ohos\\config\\default_harmony_memory_decompressor_0i4ubSG7RywokYH10IdwG9aDtsFyZTozFMIPF032ngg=.cer",
+          "keyAlias": "debugKey",
+          "keyPassword": "0000001B5ECAF2ABF9BD6D86E789C563292F7A276ED2EFAA4F1E3C2B86B6A8C852801E9FF31AD14CB9B7FE",
+          "profile": "C:\\Users\\李罗诚\\.ohos\\config\\default_harmony_memory_decompressor_0i4ubSG7RywokYH10IdwG9aDtsFyZTozFMIPF032ngg=.p7b",
+          "signAlg": "SHA256withECDSA",
+          "storeFile": "C:\\Users\\李罗诚\\.ohos\\config\\default_harmony_memory_decompressor_0i4ubSG7RywokYH10IdwG9aDtsFyZTozFMIPF032ngg=.p12",
+          "storePassword": "0000001B655E656EE8A44EF0FB342104114AA8FF87295A81FC5D5565F8DFEB18B4ECD8F22C5D5FBB9B1FB1"
+        }
+      }
+    ],
     "products": [
       {
         "name": "default",
@@ -41,6 +55,18 @@
     {
       "name": "memory_decompressor",
       "srcPath": "./memory_decompressor",
+      "targets": [
+        {
+          "name": "default",
+          "applyToProducts": [
+            "default"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "library_decompressor",
+      "srcPath": "./library_decompressor",
       "targets": [
         {
           "name": "default",

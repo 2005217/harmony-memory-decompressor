@@ -1,370 +1,255 @@
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import zstd from 'libmemory_decompressor.so'
+import { CompressorFactory } from '../compress/CompressorFactory';
+import { ICompressor } from '../compress/ICompressor';
+import { ZstdCompressor } from '../compress/ZstdCompressor';
 
 const DOMAIN = 0x0000;
 
-function stringToUint8Array(str: string): Uint8Array {
-  const arr = new Uint8Array(str.length);
-  for (let i = 0; i < str.length; i++) {
-    arr[i] = str.charCodeAt(i);
-  }
-  return arr;
-}
-
-function uint8ArrayToString(arr: Uint8Array): string {
-  let str = '';
-  for (let i = 0; i < arr.length; i++) {
-    str += String.fromCharCode(arr[i]);
-  }
-  return str;
-}
-
-function uint8ArrayEquals(a: Uint8Array, b: Uint8Array): boolean {
-  if (a.length !== b.length) {
-    return false;
-  }
-  for (let i = 0; i < a.length; i++) {
-    if (a[i] !== b[i]) {
-      return false;
-    }
+function arraysEqual(a: ArrayBuffer, b: ArrayBuffer): boolean {
+  if (a.byteLength !== b.byteLength) return false;
+  const va = new Uint8Array(a);
+  const vb = new Uint8Array(b);
+  for (let i = 0; i < va.length; i++) {
+    if (va[i] !== vb[i]) return false;
   }
   return true;
 }
 
-function generateTestData(size: number): Uint8Array {
+function generateTestData(size: number): ArrayBuffer {
   const data = new Uint8Array(size);
   for (let i = 0; i < size; i++) {
     data[i] = (i * 73 + 137) & 0xFF;
   }
-  return data;
+  return data.buffer;
 }
 
-// 辅助函数：Uint8Array 转十六进制字符串（限制最大长度）
-function uint8ArrayToHex(arr: Uint8Array, maxBytes: number = 64): string {
-  const len = Math.min(arr.length, maxBytes);
-  let hex = '';
-  for (let i = 0; i < len; i++) {
-    hex += arr[i].toString(16).padStart(2, '0');
-    if ((i + 1) % 16 === 0) {
-      hex += '\n    ';
-    } else if ((i + 1) % 4 === 0) {
-      hex += ' ';
-    }
-  }
-  if (arr.length > maxBytes) {
-    hex += ' ... (' + arr.length + ' 字节)';
-  }
-  return hex;
+class FormatInfo {
+  name: string = '';
+  compressor: ICompressor = new ZstdCompressor();
 }
 
 @Entry
 @Component
 struct Index {
-  @State testInput: string = 'HarmonyOS ZSTD compression test. ' + 
-    'This is a larger test message to verify compression and decompression functionality. '.repeat(20);
   @State logText: string = '';
-  private compressedData: ArrayBuffer | undefined = undefined;
-  @State originalSize: number = 0;
-  @State compressedSize: number = 0;
-  @State compressionRatio: string = '';
+  @State testInput: string = 'HarmonyOS compression test. ' +
+    'This is a test message for verifying all three compression formats. '.repeat(10);
+  @State running: boolean = false;
+  @State autoRun: boolean = false;
+  private zstdCompressor: ICompressor = CompressorFactory.create('zstd');
+  private lz4Compressor: ICompressor = CompressorFactory.create('lz4');
+  private snappyCompressor: ICompressor = CompressorFactory.create('snappy');
 
   aboutToAppear(): void {
-    this.appendLog('页面加载完成，开始检测NAPI模块...');
-    this.checkModule();
-  }
-
-  checkModule(): void {
-    try {
-      if (!zstd) {
-        this.appendLog('[错误] zstd 模块未加载');
-        return;
-      }
-      this.appendLog('zstd 模块已加载');
-      this.appendLog('zstd 类型: ' + typeof zstd);
-      this.appendLog('可用接口: ' + Object.keys(zstd).join(', '));
-    } catch (e) {
-      const errMsg = (e instanceof Error) ? e.message : JSON.stringify(e);
-      this.appendLog('[异常] 模块检测失败: ' + errMsg);
-    }
+    this.appendLog('页面加载完成');
+    this.appendLog('ZSTD 压缩器: ' + this.zstdCompressor.getFormatName());
+    this.appendLog('LZ4 压缩器: ' + this.lz4Compressor.getFormatName());
+    this.appendLog('Snappy 压缩器: ' + this.snappyCompressor.getFormatName());
+    this.appendLog('-----------------------------');
   }
 
   appendLog(msg: string): void {
     this.logText += '[' + new Date().toLocaleTimeString() + '] ' + msg + '\n';
-    hilog.info(DOMAIN, 'ZstdTest', '%{public}s', msg);
-  }
-
-  testVersion(): void {
-    try {
-      if (typeof zstd.version !== 'function') {
-        this.appendLog('[错误] version 不是函数');
-        return;
-      }
-      const version: string = zstd.version();
-      this.appendLog('ZSTD 版本: ' + version);
-    } catch (e) {
-      const errMsg = (e instanceof Error) ? e.message : JSON.stringify(e);
-      this.appendLog('[异常] version 调用失败: ' + errMsg);
-    }
-  }
-
-  testGetSupportedFormats(): void {
-    try {
-      if (typeof zstd.getSupportedFormats !== 'function') {
-        this.appendLog('[错误] getSupportedFormats 不是函数');
-        return;
-      }
-      const formats: string[] = zstd.getSupportedFormats();
-      this.appendLog('支持的压缩格式: ' + JSON.stringify(formats));
-    } catch (e) {
-      const errMsg = (e instanceof Error) ? e.message : JSON.stringify(e);
-      this.appendLog('[异常] getSupportedFormats 调用失败: ' + errMsg);
-    }
-  }
-
-  testCompress(): void {
-    try {
-      if (typeof zstd.compress !== 'function') {
-        this.appendLog('[错误] compress 不是函数');
-        return;
-      }
-      const inputText: string = this.testInput;
-      if (!inputText) {
-        this.appendLog('[错误] 请输入测试数据');
-        return;
-      }
-      const originalData: Uint8Array = stringToUint8Array(inputText);
-      this.originalSize = originalData.length;
-
-      const compressed: ArrayBuffer = zstd.compress(originalData.buffer);
-      this.compressedData = compressed;
-      this.compressedSize = compressed.byteLength;
-
-      const ratio: string = ((compressed.byteLength / originalData.length) * 100).toFixed(2);
-      this.compressionRatio = ratio;
-
-      this.appendLog('压缩完成');
-      this.appendLog('  原始大小: ' + originalData.length + ' 字节');
-      this.appendLog('  压缩后大小: ' + compressed.byteLength + ' 字节');
-      this.appendLog('  压缩率: ' + ratio + '%');
-      this.appendLog('  压缩数据(Hex, 前64字节):');
-      this.appendLog('    ' + uint8ArrayToHex(new Uint8Array(compressed), 64));
-    } catch (e) {
-      const errMsg = (e instanceof Error) ? e.message : JSON.stringify(e);
-      this.appendLog('[异常] compress 调用失败: ' + errMsg);
-    }
-  }
-
-  testCompressWithLevel(level: number): void {
-    try {
-      const inputText: string = this.testInput;
-      if (!inputText) {
-        this.appendLog('[错误] 请输入测试数据');
-        return;
-      }
-      const originalData: Uint8Array = stringToUint8Array(inputText);
-      const compressed: ArrayBuffer = zstd.compress(originalData.buffer, level);
-      const ratio: string = ((compressed.byteLength / originalData.length) * 100).toFixed(2);
-      this.appendLog('压缩级别 ' + level + ': ' + originalData.length + ' → ' + compressed.byteLength + ' 字节, 压缩率 ' + ratio + '%');
-    } catch (e) {
-      const errMsg = (e instanceof Error) ? e.message : JSON.stringify(e);
-      this.appendLog('[异常] compress(level=' + level + ') 失败: ' + errMsg);
-    }
-  }
-
-  testDecompress(): void {
-    try {
-      if (typeof zstd.decompress !== 'function') {
-        this.appendLog('[错误] decompress 不是函数');
-        return;
-      }
-      if (!this.compressedData) {
-        this.appendLog('[错误] 请先执行压缩测试');
-        return;
-      }
-      const decompressed: ArrayBuffer = zstd.decompress(this.compressedData);
-      const decompressedView: Uint8Array = new Uint8Array(decompressed);
-      const originalData: Uint8Array = stringToUint8Array(this.testInput);
-      const match: boolean = uint8ArrayEquals(decompressedView, originalData);
-
-      this.appendLog('解压完成');
-      this.appendLog('  解压后大小: ' + decompressed.byteLength + ' 字节');
-      this.appendLog('  逐字节一致性验证: ' + (match ? '通过' : '失败'));
-      this.appendLog('  解压数据(文本):');
-      this.appendLog('    ' + uint8ArrayToString(decompressedView));
-
-      if (!match) {
-        this.appendLog('  原始大小: ' + originalData.length + ' 字节');
-        this.appendLog('  解压大小: ' + decompressed.byteLength + ' 字节');
-      }
-    } catch (e) {
-      const errMsg = (e instanceof Error) ? e.message : JSON.stringify(e);
-      this.appendLog('[异常] decompress 调用失败: ' + errMsg);
-    }
-  }
-
-  testDetectFormat(): void {
-    try {
-      if (typeof zstd.detectFormat !== 'function') {
-        this.appendLog('[错误] detectFormat 不是函数');
-        return;
-      }
-      if (!this.compressedData) {
-        this.appendLog('[错误] 请先执行压缩测试');
-        return;
-      }
-      const format: string = zstd.detectFormat(this.compressedData);
-      this.appendLog('检测压缩格式: ' + format);
-    } catch (e) {
-      const errMsg = (e instanceof Error) ? e.message : JSON.stringify(e);
-      this.appendLog('[异常] detectFormat 调用失败: ' + errMsg);
-    }
-  }
-
-  testEmptyData(): void {
-    try {
-      const emptyData: Uint8Array = new Uint8Array(0);
-      const compressed: ArrayBuffer = zstd.compress(emptyData.buffer);
-      this.appendLog('空数据压缩完成, 大小: ' + compressed.byteLength + ' 字节');
-      const decompressed: ArrayBuffer = zstd.decompress(compressed);
-      this.appendLog('空数据解压完成, 大小: ' + decompressed.byteLength + ' 字节');
-    } catch (e) {
-      const errMsg = (e instanceof Error) ? e.message : JSON.stringify(e);
-      this.appendLog('[异常] 空数据处理失败: ' + errMsg);
-    }
-  }
-
-  testLargeData(): void {
-    try {
-      const size: number = 100000;
-      const arr: Uint8Array = generateTestData(size);
-      const compressed: ArrayBuffer = zstd.compress(arr.buffer);
-      const ratio: string = ((compressed.byteLength / size) * 100).toFixed(2);
-      this.appendLog('大数据压缩 (100KB): ' + size + ' → ' + compressed.byteLength + ' 字节, 压缩率 ' + ratio + '%');
-      this.appendLog('  压缩数据(Hex, 前32字节):');
-      this.appendLog('    ' + uint8ArrayToHex(new Uint8Array(compressed), 32));
-      const decompressed: ArrayBuffer = zstd.decompress(compressed);
-      const decompressedView: Uint8Array = new Uint8Array(decompressed);
-      const match: boolean = uint8ArrayEquals(decompressedView, arr);
-      this.appendLog('大数据解压完成, 大小: ' + decompressed.byteLength + ' 字节, 逐字节一致性: ' + (match ? '通过' : '失败'));
-      this.appendLog('  解压数据(Hex, 前32字节):');
-      this.appendLog('    ' + uint8ArrayToHex(decompressedView, 32));
-    } catch (e) {
-      const errMsg = (e instanceof Error) ? e.message : JSON.stringify(e);
-      this.appendLog('[异常] 大数据处理失败: ' + errMsg);
-    }
-  }
-
-  testCompressAsync(): void {
-    try {
-      if (typeof zstd.compressAsync !== 'function') {
-        this.appendLog('[错误] compressAsync 不是函数');
-        return;
-      }
-      const inputText: string = this.testInput;
-      if (!inputText) {
-        this.appendLog('[错误] 请输入测试数据');
-        return;
-      }
-      const originalData: Uint8Array = stringToUint8Array(inputText);
-      this.originalSize = originalData.length;
-      this.appendLog('异步压缩开始...');
-
-      zstd.compressAsync(originalData.buffer).then((compressed: ArrayBuffer) => {
-        this.compressedData = compressed;
-        this.compressedSize = compressed.byteLength;
-        const ratio: string = ((compressed.byteLength / originalData.length) * 100).toFixed(2);
-        this.compressionRatio = ratio;
-        this.appendLog('异步压缩完成');
-        this.appendLog('  原始大小: ' + originalData.length + ' 字节');
-        this.appendLog('  压缩后大小: ' + compressed.byteLength + ' 字节');
-        this.appendLog('  压缩率: ' + ratio + '%');
-      }).catch((e: Error) => {
-        this.appendLog('[异常] 异步压缩失败: ' + e.message);
-      });
-    } catch (e) {
-      const errMsg = (e instanceof Error) ? e.message : JSON.stringify(e);
-      this.appendLog('[异常] compressAsync 调用失败: ' + errMsg);
-    }
-  }
-
-  testDecompressAsync(): void {
-    try {
-      if (typeof zstd.decompressAsync !== 'function') {
-        this.appendLog('[错误] decompressAsync 不是函数');
-        return;
-      }
-      if (!this.compressedData) {
-        this.appendLog('[错误] 请先执行压缩测试');
-        return;
-      }
-      this.appendLog('异步解压开始...');
-
-      zstd.decompressAsync(this.compressedData).then((decompressed: ArrayBuffer) => {
-        const decompressedView: Uint8Array = new Uint8Array(decompressed);
-        const originalData: Uint8Array = stringToUint8Array(this.testInput);
-        const match: boolean = uint8ArrayEquals(decompressedView, originalData);
-        this.appendLog('异步解压完成');
-        this.appendLog('  解压后大小: ' + decompressed.byteLength + ' 字节');
-        this.appendLog('  逐字节一致性验证: ' + (match ? '通过' : '失败'));
-        this.appendLog('  解压数据(文本):');
-        this.appendLog('    ' + uint8ArrayToString(decompressedView));
-      }).catch((e: Error) => {
-        this.appendLog('[异常] 异步解压失败: ' + e.message);
-      });
-    } catch (e) {
-      const errMsg = (e instanceof Error) ? e.message : JSON.stringify(e);
-      this.appendLog('[异常] decompressAsync 调用失败: ' + errMsg);
-    }
-  }
-
-  testLargeDataAsync(): void {
-    try {
-      if (typeof zstd.compressAsync !== 'function') {
-        this.appendLog('[错误] compressAsync 不是函数');
-        return;
-      }
-      const size: number = 100000;
-      const arr: Uint8Array = generateTestData(size);
-      this.appendLog('异步大数据压缩开始 (100KB)...');
-
-      zstd.compressAsync(arr.buffer).then((compressed: ArrayBuffer): Promise<ArrayBuffer> => {
-        const ratio: string = ((compressed.byteLength / size) * 100).toFixed(2);
-        this.appendLog('异步大数据压缩完成: ' + size + ' → ' + compressed.byteLength + ' 字节, 压缩率 ' + ratio + '%');
-        return zstd.decompressAsync(compressed);
-      }).then((decompressed: ArrayBuffer) => {
-        const decompressedView: Uint8Array = new Uint8Array(decompressed);
-        const match: boolean = uint8ArrayEquals(decompressedView, arr);
-        this.appendLog('异步大数据解压完成, 大小: ' + decompressed.byteLength + ' 字节, 逐字节一致性: ' + (match ? '通过' : '失败'));
-      }).catch((e: Error) => {
-        this.appendLog('[异常] 异步大数据处理失败: ' + e.message);
-      });
-    } catch (e) {
-      const errMsg = (e instanceof Error) ? e.message : JSON.stringify(e);
-      this.appendLog('[异常] 异步大数据调用失败: ' + errMsg);
-    }
+    hilog.info(DOMAIN, 'CompressTest', '%{public}s', msg);
   }
 
   clearLog(): void {
     this.logText = '';
-    this.compressedData = undefined;
-    this.originalSize = 0;
-    this.compressedSize = 0;
-    this.compressionRatio = '';
   }
+
+  async runAll(): Promise<void> {
+    if (this.running) return;
+    this.running = true;
+    this.clearLog();
+    this.appendLog('>>> 开始全部测试 <<<');
+    this.appendLog('');
+
+    await this.testVersion();
+    await this.testSupportedFormats();
+
+    const formats: FormatInfo[] = [
+      { name: 'ZSTD', compressor: this.zstdCompressor },
+      { name: 'LZ4', compressor: this.lz4Compressor },
+      { name: 'Snappy', compressor: this.snappyCompressor },
+    ];
+
+    for (const fmt of formats) {
+      await this.testCompressDecompress(fmt.name, fmt.compressor);
+    }
+
+    for (const fmt of formats) {
+      await this.testLargeData(fmt.name, fmt.compressor);
+    }
+
+    await this.testEmptyData('ZSTD', this.zstdCompressor);
+    await this.testEmptyData('LZ4', this.lz4Compressor);
+    await this.testEmptyData('Snappy', this.snappyCompressor);
+
+    this.appendLog('');
+    this.appendLog('>>> 全部测试完成 <<<');
+    this.running = false;
+  }
+
+  // --------------- 版本和格式 ---------------
+
+  async testVersion(): Promise<void> {
+    try {
+      const version = this.zstdCompressor.getVersion();
+      this.appendLog('[版本] ' + version);
+      if (version.includes('ZSTD') && version.includes('LZ4') && version.includes('Snappy')) {
+        this.appendLog('[版本] ✓ 包含所有三个库的版本信息');
+      } else {
+        this.appendLog('[版本] ✗ 缺少某些库的版本信息');
+      }
+    } catch (e) {
+      this.appendLog('[版本] ✗ 异常: ' + ((e instanceof Error) ? e.message : JSON.stringify(e)));
+    }
+    this.appendLog('');
+  }
+
+  async testSupportedFormats(): Promise<void> {
+    try {
+      this.appendLog('[格式] 三种压缩器创建成功: ZSTD, LZ4, Snappy');
+      const formatNames = [
+        this.zstdCompressor.getFormatName(),
+        this.lz4Compressor.getFormatName(),
+        this.snappyCompressor.getFormatName(),
+      ];
+      this.appendLog('[格式] getFormatName(): ' + JSON.stringify(formatNames));
+      if (formatNames.indexOf('ZSTD') >= 0 && formatNames.indexOf('LZ4') >= 0 && formatNames.indexOf('SNAPPY') >= 0) {
+        this.appendLog('[格式] ✓ 全部正确');
+      } else {
+        this.appendLog('[格式] ✗ 名称不正确');
+      }
+    } catch (e) {
+      this.appendLog('[格式] ✗ 异常: ' + ((e instanceof Error) ? e.message : JSON.stringify(e)));
+    }
+    this.appendLog('');
+  }
+
+  // --------------- 单格式 压缩→解压→验证 ---------------
+
+  async testCompressDecompress(name: string, compressor: ICompressor): Promise<void> {
+    try {
+      const inputText = this.testInput;
+      const original = new Uint8Array(inputText.length);
+      for (let i = 0; i < inputText.length; i++) {
+        original[i] = inputText.charCodeAt(i);
+      }
+      const originalBuf = original.buffer as ArrayBuffer;
+
+      this.appendLog('[' + name + '] 开始压缩解压测试 (原始大小: ' + originalBuf.byteLength + ' 字节)');
+
+      const compressed = await compressor.compressAsync(originalBuf);
+      this.appendLog('[' + name + '] 压缩后: ' + compressed.byteLength + ' 字节, 压缩率: ' +
+        ((compressed.byteLength / originalBuf.byteLength) * 100).toFixed(2) + '%');
+
+      const decompressed = await compressor.decompressAsync(compressed);
+      const match = arraysEqual(decompressed, originalBuf);
+      this.appendLog('[' + name + '] 解压后: ' + decompressed.byteLength + ' 字节, 一致性: ' + (match ? '✓ 通过' : '✗ 失败'));
+
+      if (!match) {
+        this.appendLog('[' + name + '] ✗ 数据不一致！');
+      }
+    } catch (e) {
+      this.appendLog('[' + name + '] ✗ 异常: ' + ((e instanceof Error) ? e.message : JSON.stringify(e)));
+    }
+    this.appendLog('');
+  }
+
+  // --------------- 大数据 ---------------
+
+  async testLargeData(name: string, compressor: ICompressor): Promise<void> {
+    try {
+      const size = 65536;
+      const originalBuf = generateTestData(size);
+
+      this.appendLog('[' + name + '] 大数据测试 (65KB, 原始: ' + originalBuf.byteLength + ' 字节)');
+
+      const compressed = await compressor.compressAsync(originalBuf);
+      this.appendLog('[' + name + '] 压缩后: ' + compressed.byteLength + ' 字节, 压缩率: ' +
+        ((compressed.byteLength / size) * 100).toFixed(2) + '%');
+
+      const decompressed = await compressor.decompressAsync(compressed);
+      const match = arraysEqual(decompressed, originalBuf);
+      this.appendLog('[' + name + '] 解压后: ' + decompressed.byteLength + ' 字节, 一致性: ' + (match ? '✓ 通过' : '✗ 失败'));
+
+      if (!match) {
+        this.appendLog('[' + name + '] ✗ 大数据数据不一致！');
+      }
+    } catch (e) {
+      this.appendLog('[' + name + '] ✗ 大数据异常: ' + ((e instanceof Error) ? e.message : JSON.stringify(e)));
+    }
+    this.appendLog('');
+  }
+
+  // --------------- 空数据 ---------------
+
+  async testEmptyData(name: string, compressor: ICompressor): Promise<void> {
+    try {
+      const originalBuf = new ArrayBuffer(0);
+      this.appendLog('[' + name + '] 空数据测试');
+
+      const compressed = await compressor.compressAsync(originalBuf);
+      this.appendLog('[' + name + '] 空数据压缩后: ' + compressed.byteLength + ' 字节');
+
+      const decompressed = await compressor.decompressAsync(compressed);
+      this.appendLog('[' + name + '] 空数据解压后: ' + decompressed.byteLength + ' 字节');
+
+      const match = decompressed.byteLength === 0;
+      this.appendLog('[' + name + '] 空数据一致性: ' + (match ? '✓ 通过' : '✗ 失败'));
+    } catch (e) {
+      this.appendLog('[' + name + '] ✗ 空数据异常: ' + ((e instanceof Error) ? e.message : JSON.stringify(e)));
+    }
+    this.appendLog('');
+  }
+
+  // --------------- 按格式单独测试 ---------------
+
+  async testSingleFormat(name: string): Promise<void> {
+    if (this.running) return;
+    this.running = true;
+
+    let compressor: ICompressor;
+    switch (name) {
+      case 'ZSTD':
+        compressor = this.zstdCompressor;
+        break;
+      case 'LZ4':
+        compressor = this.lz4Compressor;
+        break;
+      case 'Snappy':
+        compressor = this.snappyCompressor;
+        break;
+      default:
+        this.appendLog('未知格式: ' + name);
+        this.running = false;
+        return;
+    }
+
+    this.appendLog('>>> ' + name + ' 单独测试 <<<');
+    await this.testCompressDecompress(name, compressor);
+    await this.testLargeData(name, compressor);
+    await this.testEmptyData(name, compressor);
+    this.appendLog('>>> ' + name + ' 测试完成 <<<');
+    this.running = false;
+  }
+
+  // --------------- 构建 UI ---------------
 
   build() {
     Column() {
       Scroll() {
         Column() {
-          Text('ZSTD NAPI 模块测试')
-            .fontSize(24)
+          Text('压缩解压测试 (通过 CompressorFactory)')
+            .fontSize(20)
             .fontWeight(FontWeight.Bold)
             .width('100%')
             .textAlign(TextAlign.Center)
-            .margin({ top: 16, bottom: 8 })
+            .margin({ top: 16, bottom: 4 })
 
-          Text('libmemory_decompressor 接口验证')
-            .fontSize(14)
+          Text('ZSTD + LZ4 + Snappy — 工厂模式完整链路测试')
+            .fontSize(13)
             .fontColor('#888888')
             .width('100%')
             .textAlign(TextAlign.Center)
@@ -372,170 +257,82 @@ struct Index {
 
           TextArea({
             text: this.testInput,
-            placeholder: '输入要压缩的测试数据...'
+            placeholder: '输入测试数据...'
           })
             .onChange((val: string) => {
               this.testInput = val;
             })
             .width('100%')
-            .height(80)
+            .height(70)
             .backgroundColor('#F5F5F5')
             .borderRadius(8)
             .padding(8)
             .margin({ bottom: 12 })
 
-          Row() {
-            Button('版本信息')
-              .onClick(() => this.testVersion())
-              .backgroundColor('#007BFF')
-              .flexGrow(1)
-              .margin({ right: 4 })
+          // ===== 一键运行 =====
+          Button(this.running ? '运行中...' : '▶ 运行全部测试')
+            .width('100%')
+            .height(44)
+            .backgroundColor('#007BFF')
+            .fontColor('#FFFFFF')
+            .fontSize(16)
+            .fontWeight(FontWeight.Bold)
+            .borderRadius(8)
+            .enabled(!this.running)
+            .onClick(() => this.runAll())
+            .margin({ bottom: 12 })
 
-            Button('支持格式')
-              .onClick(() => this.testGetSupportedFormats())
-              .backgroundColor('#6C757D')
-              .flexGrow(1)
-              .margin({ left: 4 })
-          }
-          .width('100%')
-          .margin({ bottom: 8 })
-
+          // ===== 各格式单独运行 =====
           Row() {
-            Button('压缩测试')
-              .onClick(() => this.testCompress())
+            Button('ZSTD')
+              .onClick(() => this.testSingleFormat('ZSTD'))
               .backgroundColor('#28A745')
               .flexGrow(1)
               .margin({ right: 4 })
+              .enabled(!this.running)
 
-            Button('解压验证')
-              .onClick(() => this.testDecompress())
+            Button('LZ4')
+              .onClick(() => this.testSingleFormat('LZ4'))
+              .backgroundColor('#E83E8C')
+              .flexGrow(1)
+              .margin({ right: 4 })
+              .enabled(!this.running)
+
+            Button('Snappy')
+              .onClick(() => this.testSingleFormat('Snappy'))
               .backgroundColor('#17A2B8')
               .flexGrow(1)
-              .margin({ left: 4 })
+              .enabled(!this.running)
           }
           .width('100%')
           .margin({ bottom: 8 })
 
           Row() {
-            Button('格式检测')
-              .onClick(() => this.testDetectFormat())
-              .backgroundColor('#FFC107')
-              .flexGrow(1)
-              .fontColor('#000000')
-              .margin({ right: 4 })
-
-            Button('空数据处理')
-              .onClick(() => this.testEmptyData())
-              .backgroundColor('#DC3545')
-              .flexGrow(1)
-              .margin({ left: 4 })
-          }
-          .width('100%')
-          .margin({ bottom: 8 })
-
-          Row() {
-            Button('大数据测试(100KB)')
-              .onClick(() => this.testLargeData())
-              .backgroundColor('#6610F2')
+            Button('版本信息')
+              .onClick(() => this.testVersion())
+              .backgroundColor('#6C757D')
               .flexGrow(1)
               .margin({ right: 4 })
+              .enabled(!this.running)
 
-            Button('清除日志')
-              .onClick(() => this.clearLog())
+            Button('支持格式')
+              .onClick(() => this.testSupportedFormats())
               .backgroundColor('#6C757D')
               .flexGrow(1)
               .margin({ left: 4 })
+              .enabled(!this.running)
           }
           .width('100%')
           .margin({ bottom: 8 })
 
-          Text('异步操作测试')
-            .fontSize(16)
-            .fontWeight(FontWeight.Bold)
+          Button('清除日志')
             .width('100%')
-            .margin({ top: 8, bottom: 8 })
+            .backgroundColor('#DC3545')
+            .fontColor('#FFFFFF')
+            .onClick(() => this.clearLog())
+            .margin({ bottom: 12 })
 
-          Row() {
-            Button('异步压缩')
-              .onClick(() => this.testCompressAsync())
-              .backgroundColor('#E83E8C')
-              .flexGrow(1)
-              .margin({ right: 4 })
-
-            Button('异步解压')
-              .onClick(() => this.testDecompressAsync())
-              .backgroundColor('#E83E8C')
-              .flexGrow(1)
-              .margin({ left: 4 })
-          }
-          .width('100%')
-          .margin({ bottom: 8 })
-
-          Row() {
-            Button('异步大数据(100KB)')
-              .onClick(() => this.testLargeDataAsync())
-              .backgroundColor('#E83E8C')
-              .flexGrow(1)
-              .margin({ right: 4 })
-
-            Button('')
-              .backgroundColor('#E83E8C')
-              .flexGrow(1)
-              .margin({ left: 4 })
-              .enabled(false)
-              .opacity(0)
-          }
-          .width('100%')
-          .margin({ bottom: 12 })
-
-          Text('不同压缩级别对比')
-            .fontSize(16)
-            .fontWeight(FontWeight.Bold)
-            .width('100%')
-            .margin({ top: 8, bottom: 8 })
-
-          Row() {
-            Button('级别 1')
-              .onClick(() => this.testCompressWithLevel(1))
-              .backgroundColor('#20C997')
-              .flexGrow(1)
-              .margin({ right: 4 })
-
-            Button('级别 3')
-              .onClick(() => this.testCompressWithLevel(3))
-              .backgroundColor('#20C997')
-              .flexGrow(1)
-              .margin({ right: 4 })
-
-            Button('级别 6')
-              .onClick(() => this.testCompressWithLevel(6))
-              .backgroundColor('#20C997')
-              .flexGrow(1)
-              .margin({ right: 4 })
-
-            Button('级别 9')
-              .onClick(() => this.testCompressWithLevel(9))
-              .backgroundColor('#20C997')
-              .flexGrow(1)
-              .margin({ left: 4 })
-          }
-          .width('100%')
-          .margin({ bottom: 12 })
-
-          if (this.compressedSize > 0) {
-            Text('压缩结果摘要')
-              .fontSize(16)
-              .fontWeight(FontWeight.Bold)
-              .width('100%')
-              .margin({ bottom: 4 })
-
-            Text('原始: ' + this.originalSize + ' 字节 | 压缩: ' + this.compressedSize + ' 字节 | 压缩率: ' + this.compressionRatio + '%')
-              .fontSize(14)
-              .fontColor('#28A745')
-              .width('100%')
-              .margin({ bottom: 12 })
-          }
-
+          // ===== 运行日志 =====
           Text('运行日志')
             .fontSize(16)
             .fontWeight(FontWeight.Bold)
@@ -544,7 +341,7 @@ struct Index {
 
           TextArea({ text: this.logText })
             .width('100%')
-            .height(300)
+            .height(350)
             .backgroundColor('#1E1E1E')
             .fontColor('#00FF00')
             .fontSize(12)
